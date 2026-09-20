@@ -1,0 +1,27 @@
+{
+  "name": "querynest-qdrant-starter",
+  "version": "1.0.0",
+  "description": "QueryNest Qdrant integration assignment starter",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "seed": "ts-node src/seed.ts",
+    "migrate": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "1.9.0",
+    "@prisma/client": "^5.14.0",
+    "express": "^4.19.2",
+    "openai": "^4.47.1",
+    "pg": "^8.11.5",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.12",
+    "@types/pg": "^8.11.6",
+    "prisma": "^5.14.0"
+  }
+}

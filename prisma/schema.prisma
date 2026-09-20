@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Post {
+  id          Int      @id @default(autoincrement())
+  title       String
+  text        String
+  status      String   @default("published") // "published" | "draft"
+  communityId Int      @map("community_id")
+  authorId    Int      @map("author_id")
+  language    String   @default("en")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("posts")
+}
