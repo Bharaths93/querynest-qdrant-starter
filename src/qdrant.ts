@@ -11,7 +11,6 @@ const COLLECTION = 'querynest_posts';
 
 /**
  * Creates the Qdrant collection if it does not already exist.
- * BUG: The distance metric is wrong for text embeddings.
  */
 export async function ensureCollection() {
   const exists = await qdrant.collectionExists(COLLECTION);
@@ -20,14 +19,20 @@ export async function ensureCollection() {
   await qdrant.createCollection(COLLECTION, {
     vectors: {
       size: 1536,
-      distance: 'Euclid',   // BUG 1: wrong distance metric for text embeddings
+      distance: 'Cosine',
     },
     hnsw_config: { m: 16, ef_construct: 128 },
   });
 
-  // BUG 2: payload indexes are missing entirely
-  // Without them, filtering works but is slow and the query planner
-  // cannot choose pre-filter strategy for selective filters.
+  await qdrant.createPayloadIndex(COLLECTION, {
+    field_name: 'status',
+    field_schema: 'keyword',
+  });
+
+  await qdrant.createPayloadIndex(COLLECTION, {
+    field_name: 'community_id',
+    field_schema: 'integer',
+  });
 }
 
 /**
@@ -41,7 +46,7 @@ export async function migratePosts() {
 
   while (true) {
     const { rows } = await db.query(
-      `SELECT pe.id, pe.embedding, p.status, p.community_id, p.author_id, p.language
+      `SELECT pe.id, pe.post_id, pe.embedding, p.status, p.community_id, p.author_id, p.language
        FROM posts_embeddings pe
        JOIN posts p ON p.id = pe.post_id
        ORDER BY pe.id
@@ -50,9 +55,22 @@ export async function migratePosts() {
     );
     if (rows.length === 0) break;
 
-    // TODO: upsert rows into Qdrant
-    // Each point needs: id (integer), vector (embedding array), payload (metadata object)
-    // Use qdrant.upsert(COLLECTION, { wait: false, points: [...] })
+    const points = rows.map((row: any) => ({
+      id: row.post_id ?? row.id,
+      vector: typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding,
+      payload: {
+        post_id: row.post_id ?? row.id,
+        status: row.status,
+        community_id: row.community_id,
+        author_id: row.author_id,
+        language: row.language,
+      },
+    }));
+
+    await qdrant.upsert(COLLECTION, {
+      wait: true,
+      points,
+    });
 
     offset += rows.length;
     console.log(`Migrated ${offset} points`);
@@ -61,8 +79,6 @@ export async function migratePosts() {
 
 /**
  * Runs filtered semantic search.
- * BUG 3: filter uses 'should' (OR) instead of 'must' (AND).
- * BUG 4: with_payload is missing — results have no payload fields.
  */
 export async function filteredSearch(
   query: string,
@@ -74,9 +90,9 @@ export async function filteredSearch(
   const results = await qdrant.search(COLLECTION, {
     vector: qVec,
     limit,
-    // BUG 4: with_payload is missing here
+    with_payload: true,
     filter: {
-      should: [          // BUG 3: should = OR; must = AND
+      must: [
         { key: 'status',       match: { value: 'published' } },
         { key: 'community_id', match: { value: communityId } },
         { key: 'language',     match: { value: 'en' } },
@@ -85,7 +101,7 @@ export async function filteredSearch(
   });
 
   return results.map(r => ({
-    postId:      (r.payload as any)?.post_id as number,
+    postId:      ((r.payload as any)?.post_id ?? r.id) as number,
     score:       Number(r.score.toFixed(4)),
     status:      (r.payload as any)?.status,
     communityId: (r.payload as any)?.community_id,
